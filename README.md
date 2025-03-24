@@ -53,6 +53,26 @@ npm run build
 npm run deploy
 ```
 
+
+## スクリプトプロパティ設定
+
+以下のプロパティをGoogle Apps Scriptのスクリプトプロパティに設定する必要があります：
+
+| プロパティ名 | 説明 | デフォルト値 |
+|------------|------|------------|
+| `NOTION_TOKEN` | NotionのAPIインテグレーショントークン | (必須) |
+| `NOTION_DATABASE_ID` | ハイライトを保存するNotionデータベースのID | (必須) |
+| `GMAIL_LABEL` | 処理対象のGmailラベル | `kindle-highlights` |
+| `NOTION_TITLE_PROPERTY` | Notionデータベースのタイトル用プロパティ名 | `Name` |
+| `NOTION_AUTHOR_PROPERTY` | Notionデータベースの著者用プロパティ名 | `Authors` |
+
+### スクリプトプロパティの設定方法
+
+1. Google Apps Script エディタを開く
+2. 左側のメニューから「プロジェクトの設定」をクリック
+3. 「スクリプトプロパティ」タブを選択
+4. 「スクリプトプロパティを追加」をクリックし、上記のプロパティを設定
+
 ## 開発
 
 ### ファイル構成
