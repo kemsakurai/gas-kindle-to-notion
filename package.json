@@ -1,0 +1,23 @@
+{
+  "name": "gas-kindle-to-notion",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "src/main.ts",
+  "scripts": {
+    "build": "node esbuild.js",
+    "push": "clasp push",
+    "open": "clasp open", 
+    "deploy": "npm run build && npm run push",
+    "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/google-apps-script": "^1.0.97",
+    "esbuild": "^0.25.1",
+    "esbuild-gas-plugin": "^0.9.0",
+    "typescript": "^5.8.2"
+  }
+}
