@@ -3,6 +3,7 @@ import { test, expect, describe } from '@jest/globals';
 test('hello world!', () => {
     expect(1 + 1).toBe(2);
 });
+
 // Define required interfaces
 interface KindleHighlight {
     section: string;
@@ -423,8 +424,7 @@ describe('Kindle Highlight Parsing', () => {
         expect(bookData.highlights.length).toBe(2);
         expect(bookData.highlights[0].section).toBe('3章　devopsの歴史');
         expect(bookData.highlights[0].highlightColor).toBe('pink');
+        expect(bookData.highlights[1].section).toBe('4章　基本的な用語と概念');
         expect(bookData.highlights[1].highlightColor).toBe('pink');
-        expect(bookData.highlights[2].section).toBe('4章　基本的な用語と概念');
-        expect(bookData.highlights[2].highlightColor).toBe('pink');
     });
 });

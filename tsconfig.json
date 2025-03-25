@@ -1,18 +1,14 @@
 {
   "compilerOptions": {
-
     "target": "es2018",
-
-    "module": "commonjs",
-
-    "strict": true,
-
+    "module": "CommonJS",   // ESNextから変更
+    "moduleResolution": "Node",
     "esModuleInterop": true,
-
+    "strict": true,
+    "outDir": "dist",
     "skipLibCheck": true,
-
     "forceConsistentCasingInFileNames": true
-
   },
-  "include": ["./src"],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
 }

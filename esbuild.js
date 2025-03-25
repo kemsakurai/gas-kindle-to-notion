@@ -9,7 +9,7 @@ esbuild
         outfile: "./dist/main.js",
         plugins: [
             GasPlugin
-        ],
+        ]
     })
     .catch((error) => {
         console.log('ビルドに失敗しました')
