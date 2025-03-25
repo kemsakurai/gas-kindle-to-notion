@@ -8,6 +8,8 @@ yarn-error.log
 dist/*.js
 build/
 
+# chatlog
+chatlog
 
 # clasp認証情報
 .clasprc.json
