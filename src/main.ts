@@ -223,6 +223,9 @@ function _saveHtmlSample(htmlContent: string, messageId: string): void {
   }
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: GAS requires global function registration via esbuild-gas-plugin
+declare const global: Record<string, any>;
+
 global.processKindleHighlights = processKindleHighlights;
 global.setupTrigger = _setupTrigger;
 global.clearProcessedEmails = clearProcessedEmails;
