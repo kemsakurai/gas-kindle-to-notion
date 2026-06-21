@@ -1,4 +1,4 @@
-import { test, expect, describe } from '@jest/globals';
+import { test, expect, describe } from 'vitest';
 
 test('hello world!', () => {
     expect(1 + 1).toBe(2);
