@@ -7,6 +7,8 @@ export interface Config {
   gmailLabel: string;
   notionTitleProperty?: string; // Notion Title プロパティ名
   notionAuthorProperty?: string; // Notion 著者プロパティ名
+  notionDuplicateMode: 'skip' | 'merge'; // 重複時の動作
+  gmailMaxThreads: number; // 1回の実行で処理する最大スレッド数
 }
 
 /**
@@ -77,3 +79,25 @@ export type NotionBlock =
         rich_text: NotionRichText[];
       };
     };
+
+/**
+ * 処理結果のステータス
+ */
+export type ProcessingStatus =
+  | '成功'
+  | 'スキップ（重複）'
+  | 'マージ'
+  | 'エラー';
+
+/**
+ * 各書籍の処理結果を表すインターフェース
+ */
+export interface ProcessingResult {
+  timestamp: Date;
+  title: string;
+  authors: string;
+  highlightCount: number;
+  status: ProcessingStatus;
+  notionPageUrl: string;
+  errorDetail: string;
+}

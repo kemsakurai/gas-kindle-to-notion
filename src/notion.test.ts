@@ -15,6 +15,8 @@ const testConfig: Config = {
   gmailLabel: 'kindle-highlights',
   notionTitleProperty: 'Name',
   notionAuthorProperty: 'Authors',
+  notionDuplicateMode: 'skip',
+  gmailMaxThreads: 50,
 };
 
 const testBookData: BookData = {
