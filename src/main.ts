@@ -3,13 +3,14 @@
 
 import * as kindleParser from './kindle-parser';
 import * as notion from './notion';
-import type { Config } from './types';
+import type { Config, ProcessingResult } from './types';
 
 /**
  * 設定を取得する
  */
 function getConfig(): Config {
   const properties = PropertiesService.getScriptProperties();
+  const duplicateMode = properties.getProperty('NOTION_DUPLICATE_MODE');
   return {
     notionToken: properties.getProperty('NOTION_TOKEN') || '',
     notionDatabaseId: properties.getProperty('NOTION_DATABASE_ID') || '',
@@ -18,6 +19,8 @@ function getConfig(): Config {
       properties.getProperty('NOTION_TITLE_PROPERTY') || 'Name',
     notionAuthorProperty:
       properties.getProperty('NOTION_AUTHOR_PROPERTY') || 'Authors',
+    notionDuplicateMode: duplicateMode === 'merge' ? 'merge' : 'skip',
+    gmailMaxThreads: Number(properties.getProperty('GMAIL_MAX_THREADS')) || 50,
   };
 }
 
@@ -31,38 +34,40 @@ function logMessage(message: string, isError: boolean = false): void {
 /**
  * メイン実行関数
  */
-function processKindleHighlights() {
+function processKindleHighlights(): ProcessingResult[] {
+  const results: ProcessingResult[] = [];
+
   try {
     const config = getConfig();
     logMessage('Kindleハイライト処理を開始します');
 
-    // Gmailから特定ラベルのついたメールを検索（最大5件に制限）
-    const threads = GmailApp.search(`label:${config.gmailLabel}`, 0, 1);
+    const threads = GmailApp.search(
+      `label:${config.gmailLabel}`,
+      0,
+      config.gmailMaxThreads,
+    );
     logMessage(
       `ラベル「${config.gmailLabel}」が付いたメールスレッドが${threads.length}件見つかりました`,
     );
 
     if (threads.length === 0) {
       logMessage('処理するメールがありません');
-      return;
+      return results;
     }
 
-    // 実行開始時間を記録
     const startTime = Date.now();
-    const MAX_EXECUTION_TIME = 5 * 60 * 1000; // 5分（GASの上限は6分）
+    const MAX_EXECUTION_TIME = 5 * 60 * 1000;
 
-    // 各スレッドを処理
     for (const thread of threads) {
       try {
-        // 実行時間をチェック、制限に近づいたら処理を中断
         if (Date.now() - startTime > MAX_EXECUTION_TIME) {
           logMessage('実行時間制限に近づいたため、処理を中断します');
           break;
         }
 
-        processThread(thread, config);
+        const threadResults = processThread(thread, config);
+        results.push(...threadResults);
 
-        // メモリ解放のためにスレッド処理後に少し待機
         Utilities.sleep(1000);
       } catch (error) {
         logMessage(
@@ -72,10 +77,12 @@ function processKindleHighlights() {
       }
     }
 
-    logMessage('処理が正常に完了しました');
+    logMessage(`処理が正常に完了しました（${results.length}件処理）`);
   } catch (error) {
     logMessage(`致命的なエラーが発生しました: ${error.message}`, true);
   }
+
+  return results;
 }
 
 /**
@@ -84,17 +91,14 @@ function processKindleHighlights() {
 function processThread(
   thread: GoogleAppsScript.Gmail.GmailThread,
   config: Config,
-) {
+): ProcessingResult[] {
+  const results: ProcessingResult[] = [];
   const messages = thread.getMessages();
   logMessage(
     `スレッド(${thread.getId()})の処理を開始: ${messages.length}件のメールを確認します`,
   );
 
-  // 一度に処理するメールを制限
-  const maxMessagesToProcess = 3;
-  const messagesToProcess = messages.slice(0, maxMessagesToProcess);
-
-  for (const message of messagesToProcess) {
+  for (const message of messages) {
     try {
       const attachments = message.getAttachments();
 
@@ -113,33 +117,56 @@ function processThread(
         try {
           const fileName = attachment.getName();
 
-          // HTMLファイルのみを処理
           if (fileName.toLowerCase().endsWith('.html')) {
             logMessage(
               `メール(${message.getId()})の添付HTML「${fileName}」を処理します`,
             );
 
-            // 添付ファイルの内容を取得
             const htmlContent = attachment.getDataAsString();
 
-            // 大きなHTMLファイルの場合は処理をスキップ
-            const MAX_HTML_SIZE = 1000000; // 約1MBの制限
+            const MAX_HTML_SIZE = 1000000;
             if (htmlContent.length > MAX_HTML_SIZE) {
               logMessage(
                 `添付ファイル「${fileName}」がサイズ制限(${MAX_HTML_SIZE}文字)を超えています。スキップします。`,
                 true,
               );
+              results.push({
+                timestamp: new Date(),
+                title: fileName,
+                authors: '',
+                highlightCount: 0,
+                status: 'エラー',
+                notionPageUrl: '',
+                errorDetail: `サイズ制限超過(${htmlContent.length}文字)`,
+              });
               continue;
             }
 
             const bookData = kindleParser.parseKindleHighlights(htmlContent);
             if (bookData && bookData.highlights.length > 0) {
-              notion.sendToNotion(bookData, config);
+              const { pageId, status } = notion.sendToNotion(bookData, config);
               processedAnyAttachment = true;
+              results.push({
+                timestamp: new Date(),
+                title: bookData.title,
+                authors: bookData.authors || '',
+                highlightCount: bookData.highlights.length,
+                status,
+                notionPageUrl: `https://notion.so/${pageId.replace(/-/g, '')}`,
+                errorDetail: '',
+              });
               logMessage(`添付ファイル「${fileName}」を正常に処理しました`);
             } else {
-              // ハイライト抽出に失敗した場合、デバッグ用にHTMLサンプルを保存
               _saveHtmlSample(htmlContent, message.getId());
+              results.push({
+                timestamp: new Date(),
+                title: bookData?.title || '不明',
+                authors: bookData?.authors || '',
+                highlightCount: 0,
+                status: 'エラー',
+                notionPageUrl: '',
+                errorDetail: 'ハイライトを抽出できませんでした',
+              });
               logMessage(
                 `メール(${message.getId()})の添付ファイルからハイライトを抽出できませんでした`,
                 true,
@@ -148,10 +175,18 @@ function processThread(
           }
         } catch (error) {
           logMessage(`添付ファイル処理エラー: ${error.message}`, true);
+          results.push({
+            timestamp: new Date(),
+            title: '不明',
+            authors: '',
+            highlightCount: 0,
+            status: 'エラー',
+            notionPageUrl: '',
+            errorDetail: error.message,
+          });
         }
       }
 
-      // 処理完了したメールを削除（何かしらの添付ファイルを処理した場合のみ）
       if (processedAnyAttachment) {
         message.moveToTrash();
         logMessage(
@@ -165,6 +200,8 @@ function processThread(
       );
     }
   }
+
+  return results;
 }
 
 /**
