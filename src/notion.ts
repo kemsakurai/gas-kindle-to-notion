@@ -127,7 +127,7 @@ function createNotionPage(bookData: BookData, config: Config): string {
         i,
         i + MAX_BLOCKS_PER_REQUEST / 2,
       );
-      const batchBlocks = [];
+      const batchBlocks: NotionBlock[] = [];
 
       // バッチ内の各ハイライトのブロックを作成
       for (const highlight of batchHighlights) {

@@ -38,10 +38,42 @@ export interface Global {
 }
 
 /**
- * Notion APIブロック定義
+ * Notion APIのリッチテキスト要素
  */
-export interface NotionBlock {
-  object: string;
-  type: string;
-  [key: string]: any;
+export interface NotionRichText {
+  type: 'text';
+  text: {
+    content: string;
+  };
+  annotations?: {
+    color?: string;
+  };
 }
+
+/**
+ * Notion APIブロック定義（heading_2, heading_3, paragraph を使用）
+ */
+export type NotionBlock =
+  | {
+      object: 'block';
+      type: 'heading_2';
+      heading_2: {
+        rich_text: NotionRichText[];
+        color: string;
+      };
+    }
+  | {
+      object: 'block';
+      type: 'heading_3';
+      heading_3: {
+        rich_text: NotionRichText[];
+        color: string;
+      };
+    }
+  | {
+      object: 'block';
+      type: 'paragraph';
+      paragraph: {
+        rich_text: NotionRichText[];
+      };
+    };
