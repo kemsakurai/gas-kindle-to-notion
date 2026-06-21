@@ -2,6 +2,7 @@
 // Gmailをポーリングし、特定のラベルが付いたメールを取得して処理する
 
 import * as kindleParser from './kindle-parser';
+import * as logger from './logger';
 import * as notion from './notion';
 import type { Config, ProcessingResult } from './types';
 
@@ -81,6 +82,9 @@ function processKindleHighlights(): ProcessingResult[] {
   } catch (error) {
     logMessage(`致命的なエラーが発生しました: ${error.message}`, true);
   }
+
+  // 処理結果をスプレッドシートに記録
+  logger.writeResults(results);
 
   return results;
 }
