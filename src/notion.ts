@@ -1,4 +1,10 @@
-import type { BookData, Config, KindleHighlight, NotionBlock } from './types';
+import type {
+  BookData,
+  Config,
+  KindleHighlight,
+  NotionBlock,
+  ProcessingStatus,
+} from './types';
 
 /**
  * ログ記録関数
@@ -8,16 +14,134 @@ function logMessage(message: string, isError: boolean = false): void {
 }
 
 /**
- * NotionにBookDataを送信する関数
+ * Notion DBをタイトルで検索し、既存ページIDを返す（なければnull）
  */
-export function sendToNotion(bookData: BookData, config: Config) {
+export function queryNotionDatabase(
+  title: string,
+  config: Config,
+): string | null {
+  const payload = {
+    filter: {
+      property: config.notionTitleProperty || 'Name',
+      title: {
+        equals: title,
+      },
+    },
+    page_size: 1,
+  };
+
+  const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+    method: 'post',
+    headers: {
+      Authorization: `Bearer ${config.notionToken}`,
+      'Notion-Version': '2022-06-28',
+      'Content-Type': 'application/json',
+    },
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  };
+
+  const response = UrlFetchApp.fetch(
+    `https://api.notion.com/v1/databases/${config.notionDatabaseId}/query`,
+    options,
+  );
+
+  if (response.getResponseCode() !== 200) {
+    logMessage(`Notion DB検索エラー: ${response.getContentText()}`, true);
+    return null;
+  }
+
+  const data = JSON.parse(response.getContentText());
+  if (data.results && data.results.length > 0) {
+    return data.results[0].id;
+  }
+  return null;
+}
+
+/**
+ * 既存ページのparagraphブロックのテキストをSetで返す
+ */
+export function getExistingHighlightTexts(
+  pageId: string,
+  config: Config,
+): Set<string> {
+  const texts = new Set<string>();
+
+  const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
+    method: 'get',
+    headers: {
+      Authorization: `Bearer ${config.notionToken}`,
+      'Notion-Version': '2022-06-28',
+    },
+    muteHttpExceptions: true,
+  };
+
+  const response = UrlFetchApp.fetch(
+    `https://api.notion.com/v1/blocks/${pageId}/children?page_size=100`,
+    options,
+  );
+
+  if (response.getResponseCode() !== 200) {
+    logMessage(`ブロック取得エラー: ${response.getContentText()}`, true);
+    return texts;
+  }
+
+  const data = JSON.parse(response.getContentText());
+  for (const block of data.results) {
+    if (block.type === 'paragraph' && block.paragraph?.rich_text?.length > 0) {
+      texts.add(block.paragraph.rich_text[0].text.content);
+    }
+  }
+
+  return texts;
+}
+
+/**
+ * NotionにBookDataを送信する関数
+ * 重複チェック（skip/merge）に対応
+ */
+export function sendToNotion(
+  bookData: BookData,
+  config: Config,
+): { pageId: string; status: ProcessingStatus } {
   try {
-    // Notionページを作成
+    // 重複チェック: タイトルで既存ページを検索
+    const existingPageId = queryNotionDatabase(bookData.title, config);
+
+    if (existingPageId) {
+      if (config.notionDuplicateMode === 'skip') {
+        logMessage(
+          `"${bookData.title}" は既にNotionに存在するためスキップします`,
+        );
+        return { pageId: existingPageId, status: 'スキップ（重複）' };
+      }
+
+      // merge モード: 既存ページにハイライトを追記
+      const existingTexts = getExistingHighlightTexts(existingPageId, config);
+      const newHighlights = bookData.highlights.filter(
+        (h) => !existingTexts.has(h.text),
+      );
+
+      if (newHighlights.length === 0) {
+        logMessage(
+          `"${bookData.title}" の全ハイライトが既に存在するためスキップします`,
+        );
+        return { pageId: existingPageId, status: 'スキップ（重複）' };
+      }
+
+      appendHighlightsToPage(existingPageId, newHighlights, config);
+      logMessage(
+        `"${bookData.title}" に ${newHighlights.length} 件の新規ハイライトを追記しました`,
+      );
+      return { pageId: existingPageId, status: 'マージ' };
+    }
+
+    // 新規ページを作成
     const pageId = createNotionPage(bookData, config);
     logMessage(
       `"${bookData.title}" を ${bookData.highlights.length} 件のハイライトとともにNotionに送信しました`,
     );
-    return pageId;
+    return { pageId, status: '成功' };
   } catch (error) {
     logMessage(`Notionへの送信エラー: ${error.message}`, true);
     throw error;
@@ -182,6 +306,88 @@ function createNotionPage(bookData: BookData, config: Config): string {
     `ページ作成完了: ${bookData.highlights.length}件のハイライトを${pageId}に追加しました`,
   );
   return pageId;
+}
+
+/**
+ * 既存ページにハイライトブロックを追記する（mergeモード用）
+ */
+function appendHighlightsToPage(
+  pageId: string,
+  highlights: KindleHighlight[],
+  config: Config,
+): void {
+  const MAX_BLOCKS_PER_REQUEST = 90;
+  const sections = organizeHighlightsBySection(highlights);
+
+  for (const [sectionName, sectionHighlights] of Object.entries(sections)) {
+    if (sectionName) {
+      appendBlocksToNotionPage(
+        pageId,
+        [
+          {
+            object: 'block',
+            type: 'heading_2',
+            heading_2: {
+              rich_text: [
+                {
+                  type: 'text',
+                  text: { content: sectionName },
+                },
+              ],
+              color: 'default',
+            },
+          },
+        ],
+        config,
+      );
+    }
+
+    for (
+      let i = 0;
+      i < sectionHighlights.length;
+      i += MAX_BLOCKS_PER_REQUEST / 2
+    ) {
+      const batchHighlights = sectionHighlights.slice(
+        i,
+        i + MAX_BLOCKS_PER_REQUEST / 2,
+      );
+      const batchBlocks: NotionBlock[] = [];
+
+      for (const highlight of batchHighlights) {
+        batchBlocks.push({
+          object: 'block',
+          type: 'heading_3',
+          heading_3: {
+            rich_text: [
+              {
+                type: 'text',
+                text: { content: highlight.heading },
+              },
+            ],
+            color: 'default',
+          },
+        });
+
+        const backgroundColor = mapHighlightColor(highlight.highlightColor);
+        batchBlocks.push({
+          object: 'block',
+          type: 'paragraph',
+          paragraph: {
+            rich_text: [
+              {
+                type: 'text',
+                text: { content: highlight.text },
+                annotations: { color: backgroundColor },
+              },
+            ],
+          },
+        });
+      }
+
+      appendBlocksToNotionPage(pageId, batchBlocks, config);
+      Utilities.sleep(500);
+    }
+  }
 }
 
 /**
