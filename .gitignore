@@ -11,7 +11,7 @@ build/
 # chatlog
 chatlog
 
-# clasp認証情報
+# clasp設定・認証情報
 .clasprc.json
 
 # 環境変数
