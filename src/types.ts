@@ -5,7 +5,7 @@ export interface Config {
   notionToken: string;
   notionDatabaseId: string;
   gmailLabel: string;
-  notionTitleProperty?: string;  // Notion Title プロパティ名
+  notionTitleProperty?: string; // Notion Title プロパティ名
   notionAuthorProperty?: string; // Notion 著者プロパティ名
 }
 

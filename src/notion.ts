@@ -1,4 +1,4 @@
-import { Config, BookData, KindleHighlight, NotionBlock } from './types';
+import type { BookData, Config, KindleHighlight, NotionBlock } from './types';
 
 /**
  * ログ記録関数
@@ -14,7 +14,9 @@ export function sendToNotion(bookData: BookData, config: Config) {
   try {
     // Notionページを作成
     const pageId = createNotionPage(bookData, config);
-    logMessage(`"${bookData.title}" を ${bookData.highlights.length} 件のハイライトとともにNotionに送信しました`);
+    logMessage(
+      `"${bookData.title}" を ${bookData.highlights.length} 件のハイライトとともにNotionに送信しました`,
+    );
     return pageId;
   } catch (error) {
     logMessage(`Notionへの送信エラー: ${error.message}`, true);
@@ -32,89 +34,101 @@ function createNotionPage(bookData: BookData, config: Config): string {
       title: [
         {
           text: {
-            content: bookData.title
-          }
-        }
-      ]
-    }
+            content: bookData.title,
+          },
+        },
+      ],
+    },
   };
-  
+
   if (bookData.authors && config.notionAuthorProperty) {
     properties[config.notionAuthorProperty] = {
       rich_text: [
         {
           text: {
-            content: bookData.authors
-          }
-        }
-      ]
+            content: bookData.authors,
+          },
+        },
+      ],
     };
   }
-  
+
   // まず空のページを作成
   const initialPayload = {
     parent: {
-      database_id: config.notionDatabaseId
+      database_id: config.notionDatabaseId,
     },
     properties,
-    children: [] // 最初は空のチルドレンで作成
+    children: [], // 最初は空のチルドレンで作成
   };
-  
+
   // NotionのAPIにPOSTリクエスト（ページ作成）
   const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
     method: 'post',
     headers: {
-      'Authorization': `Bearer ${config.notionToken}`,
+      Authorization: `Bearer ${config.notionToken}`,
       'Notion-Version': '2022-06-28',
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
     payload: JSON.stringify(initialPayload),
-    muteHttpExceptions: true
+    muteHttpExceptions: true,
   };
-  
-  const response = UrlFetchApp.fetch('https://api.notion.com/v1/pages', options);
-  
+
+  const response = UrlFetchApp.fetch(
+    'https://api.notion.com/v1/pages',
+    options,
+  );
+
   if (response.getResponseCode() !== 200) {
     throw new Error(`Notion APIエラー: ${response.getContentText()}`);
   }
-  
+
   const responseData = JSON.parse(response.getContentText());
   const pageId = responseData.id;
-  
+
   // コンテンツをバッチ処理するための準備
   const MAX_BLOCKS_PER_REQUEST = 90; // 安全マージンを持たせて90に設定
   const sections = organizeHighlightsBySection(bookData.highlights);
-  
+
   // セクションごとにブロックを追加
   for (const [sectionName, sectionHighlights] of Object.entries(sections)) {
     // セクションヘッダーを追加
     if (sectionName) {
       appendBlocksToNotionPage(
-        pageId, 
-        [{
-          object: 'block',
-          type: 'heading_2',
-          heading_2: {
-            rich_text: [
-              {
-                type: 'text',
-                text: {
-                  content: sectionName
-                }
-              }
-            ],
-            color: 'default'
-          }
-        }], 
-        config
+        pageId,
+        [
+          {
+            object: 'block',
+            type: 'heading_2',
+            heading_2: {
+              rich_text: [
+                {
+                  type: 'text',
+                  text: {
+                    content: sectionName,
+                  },
+                },
+              ],
+              color: 'default',
+            },
+          },
+        ],
+        config,
       );
     }
-    
+
     // ハイライトをバッチに分割
-    for (let i = 0; i < sectionHighlights.length; i += MAX_BLOCKS_PER_REQUEST / 2) {
-      const batchHighlights = sectionHighlights.slice(i, i + MAX_BLOCKS_PER_REQUEST / 2);
+    for (
+      let i = 0;
+      i < sectionHighlights.length;
+      i += MAX_BLOCKS_PER_REQUEST / 2
+    ) {
+      const batchHighlights = sectionHighlights.slice(
+        i,
+        i + MAX_BLOCKS_PER_REQUEST / 2,
+      );
       const batchBlocks = [];
-      
+
       // バッチ内の各ハイライトのブロックを作成
       for (const highlight of batchHighlights) {
         // ハイライトの見出しを追加
@@ -126,17 +140,17 @@ function createNotionPage(bookData: BookData, config: Config): string {
               {
                 type: 'text',
                 text: {
-                  content: highlight.heading
-                }
-              }
+                  content: highlight.heading,
+                },
+              },
             ],
-            color: 'default'
-          }
+            color: 'default',
+          },
         });
-        
+
         // ハイライトのテキストを追加（色付き）
         const backgroundColor = mapHighlightColor(highlight.highlightColor);
-        
+
         batchBlocks.push({
           object: 'block',
           type: 'paragraph',
@@ -145,75 +159,86 @@ function createNotionPage(bookData: BookData, config: Config): string {
               {
                 type: 'text',
                 text: {
-                  content: highlight.text
+                  content: highlight.text,
                 },
                 annotations: {
-                  color: backgroundColor
-                }
-              }
-            ]
-          }
+                  color: backgroundColor,
+                },
+              },
+            ],
+          },
         });
       }
-      
+
       // バッチをNotionに送信
       appendBlocksToNotionPage(pageId, batchBlocks, config);
-      
+
       // APIレート制限を避けるために少し待機
       Utilities.sleep(500);
     }
   }
-  
-  logMessage(`ページ作成完了: ${bookData.highlights.length}件のハイライトを${pageId}に追加しました`);
+
+  logMessage(
+    `ページ作成完了: ${bookData.highlights.length}件のハイライトを${pageId}に追加しました`,
+  );
   return pageId;
 }
 
 /**
  * ハイライトをセクション別に整理する
  */
-function organizeHighlightsBySection(highlights: KindleHighlight[]): Record<string, KindleHighlight[]> {
+function organizeHighlightsBySection(
+  highlights: KindleHighlight[],
+): Record<string, KindleHighlight[]> {
   const sections: Record<string, KindleHighlight[]> = {};
-  
+
   for (const highlight of highlights) {
     const sectionName = highlight.section || '未分類';
-    
+
     if (!sections[sectionName]) {
       sections[sectionName] = [];
     }
-    
+
     sections[sectionName].push(highlight);
   }
-  
+
   return sections;
 }
 
 /**
  * Notionページに追加のブロックを追加する
  */
-function appendBlocksToNotionPage(pageId: string, blocks: NotionBlock[], config: Config): void {
+function appendBlocksToNotionPage(
+  pageId: string,
+  blocks: NotionBlock[],
+  config: Config,
+): void {
   try {
     const payload = {
-      children: blocks
+      children: blocks,
     };
-    
+
     // Notionのappend_block_children APIにリクエスト
     const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
       method: 'patch',
       headers: {
-        'Authorization': `Bearer ${config.notionToken}`,
+        Authorization: `Bearer ${config.notionToken}`,
         'Notion-Version': '2022-06-28',
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
       },
       payload: JSON.stringify(payload),
-      muteHttpExceptions: true
+      muteHttpExceptions: true,
     };
-    
-    const response = UrlFetchApp.fetch(`https://api.notion.com/v1/blocks/${pageId}/children`, options);
-    
+
+    const response = UrlFetchApp.fetch(
+      `https://api.notion.com/v1/blocks/${pageId}/children`,
+      options,
+    );
+
     if (response.getResponseCode() !== 200) {
       throw new Error(`ブロック追加エラー: ${response.getContentText()}`);
     }
-    
+
     logMessage(`${blocks.length}個のブロックをページに追加しました`);
   } catch (error) {
     logMessage(`ブロック追加エラー: ${error.message}`, true);
