@@ -66,6 +66,8 @@ export function getExistingHighlightTexts(
   config: Config,
 ): Set<string> {
   const texts = new Set<string>();
+  let hasMore = true;
+  let nextCursor: string | undefined;
 
   const options: GoogleAppsScript.URL_Fetch.URLFetchRequestOptions = {
     method: 'get',
@@ -76,21 +78,31 @@ export function getExistingHighlightTexts(
     muteHttpExceptions: true,
   };
 
-  const response = UrlFetchApp.fetch(
-    `https://api.notion.com/v1/blocks/${pageId}/children?page_size=100`,
-    options,
-  );
-
-  if (response.getResponseCode() !== 200) {
-    logMessage(`ブロック取得エラー: ${response.getContentText()}`, true);
-    return texts;
-  }
-
-  const data = JSON.parse(response.getContentText());
-  for (const block of data.results) {
-    if (block.type === 'paragraph' && block.paragraph?.rich_text?.length > 0) {
-      texts.add(block.paragraph.rich_text[0].text.content);
+  while (hasMore) {
+    let url = `https://api.notion.com/v1/blocks/${pageId}/children?page_size=100`;
+    if (nextCursor) {
+      url += `&start_cursor=${nextCursor}`;
     }
+
+    const response = UrlFetchApp.fetch(url, options);
+
+    if (response.getResponseCode() !== 200) {
+      logMessage(`ブロック取得エラー: ${response.getContentText()}`, true);
+      break;
+    }
+
+    const data = JSON.parse(response.getContentText());
+    for (const block of data.results) {
+      if (
+        block.type === 'paragraph' &&
+        block.paragraph?.rich_text?.length > 0
+      ) {
+        texts.add(block.paragraph.rich_text[0].text.content);
+      }
+    }
+
+    hasMore = data.has_more;
+    nextCursor = data.next_cursor;
   }
 
   return texts;

@@ -130,6 +130,52 @@ describe('getExistingHighlightTexts', () => {
     const result = getExistingHighlightTexts('page-123', testConfig);
     expect(result).toEqual(new Set());
   });
+
+  test('has_moreがtrueの場合、next_cursorを使って次ページを取得する', () => {
+    mockFetch
+      .mockReturnValueOnce(
+        mockSuccessResponse({
+          results: [
+            {
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ text: { content: 'page 1 highlight' } }],
+              },
+            },
+          ],
+          has_more: true,
+          next_cursor: 'cursor-abc',
+        }),
+      )
+      .mockReturnValueOnce(
+        mockSuccessResponse({
+          results: [
+            {
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ text: { content: 'page 2 highlight' } }],
+              },
+            },
+          ],
+          has_more: false,
+        }),
+      );
+
+    const result = getExistingHighlightTexts('page-123', testConfig);
+
+    expect(result).toEqual(new Set(['page 1 highlight', 'page 2 highlight']));
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const [url1] = mockFetch.mock.calls[0];
+    const [url2] = mockFetch.mock.calls[1];
+
+    expect(url1).toBe(
+      'https://api.notion.com/v1/blocks/page-123/children?page_size=100',
+    );
+    expect(url2).toBe(
+      'https://api.notion.com/v1/blocks/page-123/children?page_size=100&start_cursor=cursor-abc',
+    );
+  });
 });
 
 describe('sendToNotion', () => {
