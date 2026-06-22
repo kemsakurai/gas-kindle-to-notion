@@ -53,6 +53,28 @@ export interface NotionRichText {
 }
 
 /**
+ * 処理結果のステータス
+ */
+export type ProcessingStatus =
+  | '成功'
+  | 'スキップ（重複）'
+  | 'マージ'
+  | 'エラー';
+
+/**
+ * 各書籍の処理結果を表すインターフェース
+ */
+export interface ProcessingResult {
+  timestamp: Date;
+  title: string;
+  authors: string;
+  highlightCount: number;
+  status: ProcessingStatus;
+  notionPageUrl: string;
+  errorDetail: string;
+}
+
+/**
  * Notion APIブロック定義（heading_2, heading_3, paragraph を使用）
  */
 export type NotionBlock =
@@ -79,25 +101,3 @@ export type NotionBlock =
         rich_text: NotionRichText[];
       };
     };
-
-/**
- * 処理結果のステータス
- */
-export type ProcessingStatus =
-  | '成功'
-  | 'スキップ（重複）'
-  | 'マージ'
-  | 'エラー';
-
-/**
- * 各書籍の処理結果を表すインターフェース
- */
-export interface ProcessingResult {
-  timestamp: Date;
-  title: string;
-  authors: string;
-  highlightCount: number;
-  status: ProcessingStatus;
-  notionPageUrl: string;
-  errorDetail: string;
-}
