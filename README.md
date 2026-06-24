@@ -11,6 +11,9 @@
 - セクション別のハイライト内容の抽出
 - ハイライトの色情報の保持
 - Notionデータベースへのデータ送信
+- **重複チェック**: 同じ書籍が既にNotionにある場合のスキップまたはマージ
+- **一括処理**: 1回の実行で溜まったメールを全件処理（GAS 6分制限内）
+- **処理ログ**: 処理結果をGoogle Sheetsに自動記録
 
 ## 技術スタック
 
@@ -54,6 +57,19 @@ npm run deploy
 ```
 
 
+## コンテナバインドスクリプトとしてのセットアップ
+
+このアプリケーションはGoogle Sheetsのコンテナバインドスクリプトとしてデプロイすることを推奨します。処理結果のログがスプレッドシートに自動記録されます。
+
+1. Google Sheetsで新しいスプレッドシートを作成
+2. 「拡張機能」→「Apps Script」でスクリプトエディタを開く
+3. スクリプトIDを `.clasp.json` の `scriptId` に設定
+4. `npm run deploy` でデプロイ
+5. スクリプトプロパティを設定（下記参照）
+6. 「トリガー」から `processKindleHighlights` を定期実行に設定
+
+処理結果は自動的に `ProcessingLog` シートに記録されます。
+
 ## スクリプトプロパティ設定
 
 以下のプロパティをGoogle Apps Scriptのスクリプトプロパティに設定する必要があります：
@@ -65,6 +81,8 @@ npm run deploy
 | `GMAIL_LABEL` | 処理対象のGmailラベル | `kindle-highlights` |
 | `NOTION_TITLE_PROPERTY` | Notionデータベースのタイトル用プロパティ名 | `Name` |
 | `NOTION_AUTHOR_PROPERTY` | Notionデータベースの著者用プロパティ名 | `Authors` |
+| `NOTION_DUPLICATE_MODE` | 重複時の動作。`skip`（スキップ）または `merge`（追記） | `skip` |
+| `GMAIL_MAX_THREADS` | 1回の実行で処理する最大スレッド数 | `50` |
 
 ### スクリプトプロパティの設定方法
 

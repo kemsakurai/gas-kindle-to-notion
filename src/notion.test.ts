@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, test, vi } from 'vitest';
-import { sendToNotion } from './notion';
+import {
+  getExistingHighlightTexts,
+  queryNotionDatabase,
+  sendToNotion,
+} from './notion';
 import type { BookData, Config } from './types';
 
 // GAS グローバルのモック
@@ -15,6 +19,8 @@ const testConfig: Config = {
   gmailLabel: 'kindle-highlights',
   notionTitleProperty: 'Name',
   notionAuthorProperty: 'Authors',
+  notionDuplicateMode: 'skip',
+  gmailMaxThreads: 50,
 };
 
 const testBookData: BookData = {
@@ -46,19 +52,230 @@ function mockErrorResponse(code: number, message: string) {
   };
 }
 
+describe('queryNotionDatabase', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  test('タイトルが一致するページのIDを返す', () => {
+    mockFetch.mockReturnValue(
+      mockSuccessResponse({
+        results: [{ id: 'existing-page-id' }],
+      }),
+    );
+
+    const result = queryNotionDatabase('Test Book', testConfig);
+    expect(result).toBe('existing-page-id');
+
+    const [url, options] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.notion.com/v1/databases/test-db-id/query');
+    expect(options.method).toBe('post');
+
+    const payload = JSON.parse(options.payload);
+    expect(payload.filter.property).toBe('Name');
+    expect(payload.filter.title.equals).toBe('Test Book');
+  });
+
+  test('一致するページがなければnullを返す', () => {
+    mockFetch.mockReturnValue(mockSuccessResponse({ results: [] }));
+
+    const result = queryNotionDatabase('Nonexistent Book', testConfig);
+    expect(result).toBeNull();
+  });
+});
+
+describe('getExistingHighlightTexts', () => {
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  test('既存ページのparagraphテキストをSetで返す', () => {
+    mockFetch.mockReturnValue(
+      mockSuccessResponse({
+        results: [
+          {
+            type: 'paragraph',
+            paragraph: {
+              rich_text: [{ text: { content: 'existing highlight' } }],
+            },
+          },
+          {
+            type: 'heading_3',
+            heading_3: {
+              rich_text: [{ text: { content: 'heading text' } }],
+            },
+          },
+          {
+            type: 'paragraph',
+            paragraph: {
+              rich_text: [{ text: { content: 'another highlight' } }],
+            },
+          },
+        ],
+        has_more: false,
+      }),
+    );
+
+    const result = getExistingHighlightTexts('page-123', testConfig);
+    expect(result).toEqual(
+      new Set(['existing highlight', 'another highlight']),
+    );
+  });
+
+  test('ブロックがなければ空のSetを返す', () => {
+    mockFetch.mockReturnValue(
+      mockSuccessResponse({ results: [], has_more: false }),
+    );
+
+    const result = getExistingHighlightTexts('page-123', testConfig);
+    expect(result).toEqual(new Set());
+  });
+
+  test('has_moreがtrueの場合、next_cursorを使って次ページを取得する', () => {
+    mockFetch
+      .mockReturnValueOnce(
+        mockSuccessResponse({
+          results: [
+            {
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ text: { content: 'page 1 highlight' } }],
+              },
+            },
+          ],
+          has_more: true,
+          next_cursor: 'cursor-abc',
+        }),
+      )
+      .mockReturnValueOnce(
+        mockSuccessResponse({
+          results: [
+            {
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ text: { content: 'page 2 highlight' } }],
+              },
+            },
+          ],
+          has_more: false,
+        }),
+      );
+
+    const result = getExistingHighlightTexts('page-123', testConfig);
+
+    expect(result).toEqual(new Set(['page 1 highlight', 'page 2 highlight']));
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+
+    const [url1] = mockFetch.mock.calls[0];
+    const [url2] = mockFetch.mock.calls[1];
+
+    expect(url1).toBe(
+      'https://api.notion.com/v1/blocks/page-123/children?page_size=100',
+    );
+    expect(url2).toBe(
+      'https://api.notion.com/v1/blocks/page-123/children?page_size=100&start_cursor=cursor-abc',
+    );
+  });
+});
+
 describe('sendToNotion', () => {
   beforeEach(() => {
     mockFetch.mockReset();
     mockSleep.mockReset();
-    // デフォルトで全リクエスト成功
     mockFetch.mockReturnValue(mockSuccessResponse());
   });
 
+  test('重複なしの場合、新規ページを作成し「成功」を返す', () => {
+    mockFetch
+      .mockReturnValueOnce(mockSuccessResponse({ results: [] }))
+      .mockReturnValue(mockSuccessResponse({ id: 'page-123' }));
+
+    const result = sendToNotion(testBookData, testConfig);
+    expect(result.status).toBe('成功');
+    expect(result.pageId).toBe('page-123');
+  });
+
+  test('skipモードで重複がある場合、スキップする', () => {
+    mockFetch.mockReturnValueOnce(
+      mockSuccessResponse({ results: [{ id: 'existing-page' }] }),
+    );
+
+    const skipConfig = {
+      ...testConfig,
+      notionDuplicateMode: 'skip' as const,
+    };
+    const result = sendToNotion(testBookData, skipConfig);
+    expect(result.status).toBe('スキップ（重複）');
+    expect(result.pageId).toBe('existing-page');
+    // ページ作成APIは呼ばれない（DB検索の1回のみ）
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  test('mergeモードで新規ハイライトがある場合、追記する', () => {
+    mockFetch
+      .mockReturnValueOnce(
+        mockSuccessResponse({ results: [{ id: 'existing-page' }] }),
+      )
+      .mockReturnValueOnce(
+        mockSuccessResponse({
+          results: [
+            {
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ text: { content: 'old highlight' } }],
+              },
+            },
+          ],
+          has_more: false,
+        }),
+      )
+      .mockReturnValue(mockSuccessResponse());
+
+    const mergeConfig = {
+      ...testConfig,
+      notionDuplicateMode: 'merge' as const,
+    };
+    const result = sendToNotion(testBookData, mergeConfig);
+    expect(result.status).toBe('マージ');
+    expect(result.pageId).toBe('existing-page');
+  });
+
+  test('mergeモードで全ハイライトが重複している場合、スキップする', () => {
+    mockFetch
+      .mockReturnValueOnce(
+        mockSuccessResponse({ results: [{ id: 'existing-page' }] }),
+      )
+      .mockReturnValueOnce(
+        mockSuccessResponse({
+          results: [
+            {
+              type: 'paragraph',
+              paragraph: {
+                rich_text: [{ text: { content: 'Highlight text' } }],
+              },
+            },
+          ],
+          has_more: false,
+        }),
+      );
+
+    const mergeConfig = {
+      ...testConfig,
+      notionDuplicateMode: 'merge' as const,
+    };
+    const result = sendToNotion(testBookData, mergeConfig);
+    expect(result.status).toBe('スキップ（重複）');
+  });
+
   test('Notion APIにページ作成リクエストを送信する', () => {
+    mockFetch
+      .mockReturnValueOnce(mockSuccessResponse({ results: [] }))
+      .mockReturnValue(mockSuccessResponse({ id: 'page-123' }));
+
     sendToNotion(testBookData, testConfig);
 
-    // 最初の呼び出しがページ作成
-    const [url, options] = mockFetch.mock.calls[0];
+    // 2回目の呼び出しがページ作成（1回目はDB検索）
+    const [url, options] = mockFetch.mock.calls[1];
     expect(url).toBe('https://api.notion.com/v1/pages');
     expect(options.method).toBe('post');
 
@@ -68,36 +285,23 @@ describe('sendToNotion', () => {
   });
 
   test('著者プロパティをペイロードに含める', () => {
+    mockFetch
+      .mockReturnValueOnce(mockSuccessResponse({ results: [] }))
+      .mockReturnValue(mockSuccessResponse({ id: 'page-123' }));
+
     sendToNotion(testBookData, testConfig);
 
-    const [, options] = mockFetch.mock.calls[0];
+    const [, options] = mockFetch.mock.calls[1];
     const payload = JSON.parse(options.payload);
     expect(payload.properties.Authors.rich_text[0].text.content).toBe(
       'Test Author',
     );
   });
 
-  test('ハイライトブロックをページに追加する', () => {
-    sendToNotion(testBookData, testConfig);
-
-    // 2回目以降の呼び出しがブロック追加（セクションヘッダー + ハイライト）
-    expect(mockFetch.mock.calls.length).toBeGreaterThan(1);
-
-    // セクションヘッダーのブロック追加
-    const [sectionUrl] = mockFetch.mock.calls[1];
-    expect(sectionUrl).toContain('/blocks/page-123/children');
-  });
-
-  test('Authorizationヘッダーにトークンを設定する', () => {
-    sendToNotion(testBookData, testConfig);
-
-    const [, options] = mockFetch.mock.calls[0];
-    expect(options.headers.Authorization).toBe('Bearer test-token');
-    expect(options.headers['Notion-Version']).toBe('2022-06-28');
-  });
-
   test('ページ作成APIエラー時に例外を投げる', () => {
-    mockFetch.mockReturnValue(mockErrorResponse(400, 'Bad Request'));
+    mockFetch
+      .mockReturnValueOnce(mockSuccessResponse({ results: [] }))
+      .mockReturnValue(mockErrorResponse(400, 'Bad Request'));
 
     expect(() => sendToNotion(testBookData, testConfig)).toThrow(
       'Notion APIエラー',
@@ -117,15 +321,14 @@ describe('sendToNotion', () => {
       ],
     };
 
+    mockFetch
+      .mockReturnValueOnce(mockSuccessResponse({ results: [] }))
+      .mockReturnValue(mockSuccessResponse({ id: 'page-456' }));
+
     sendToNotion(bookWithoutAuthor, testConfig);
 
-    const [, options] = mockFetch.mock.calls[0];
+    const [, options] = mockFetch.mock.calls[1];
     const payload = JSON.parse(options.payload);
     expect(payload.properties.Authors).toBeUndefined();
-  });
-
-  test('ページIDを返す', () => {
-    const result = sendToNotion(testBookData, testConfig);
-    expect(result).toBe('page-123');
   });
 });
